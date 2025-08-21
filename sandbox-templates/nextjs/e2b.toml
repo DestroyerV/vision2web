@@ -1,0 +1,17 @@
+# This is a config for E2B sandbox template.
+# You can use template ID (4swgc3hfyvad2ctzqq4l) or template name (vision2web) to create a sandbox:
+
+# Python SDK
+# from e2b import Sandbox, AsyncSandbox
+# sandbox = Sandbox("vision2web") # Sync sandbox
+# sandbox = await AsyncSandbox.create("vision2web") # Async sandbox
+
+# JS SDK
+# import { Sandbox } from 'e2b'
+# const sandbox = await Sandbox.create('vision2web')
+
+team_id = "9dbf0eb4-458c-4c28-97c7-42910d5b5632"
+start_cmd = "/compile_page.sh"
+dockerfile = "e2b.Dockerfile"
+template_name = "vision2web"
+template_id = "4swgc3hfyvad2ctzqq4l"
