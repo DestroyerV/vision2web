@@ -1,4 +1,4 @@
-import { inngest } from "@/inngest/client";
+import { runCodeAgent } from "@/ai/agent";
 import { prisma } from "@/lib/db";
 import { baseProcedure, createTRPCRouter } from "@/trpc/init";
 import z from "zod";
@@ -43,13 +43,21 @@ export const messageRouter = createTRPCRouter({
         },
       });
 
-      await inngest.send({
-        name: "code-agent/run",
-        data: {
-          value: input.value,
-          projectId: input.projectId,
-        },
-      });
+      // Run the AI agent directly instead of using Inngest
+      try {
+        await runCodeAgent(input.value, input.projectId);
+      } catch (error) {
+        console.error("Error running code agent:", error);
+        // Create error message
+        await prisma.message.create({
+          data: {
+            projectId: input.projectId,
+            content: "Something went wrong. Please try again later.",
+            role: "ASSISTANT",
+            type: "ERROR",
+          },
+        });
+      }
 
       return createdMessage;
     }),
