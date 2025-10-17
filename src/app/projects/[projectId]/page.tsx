@@ -1,7 +1,6 @@
 import { dehydrate, HydrationBoundary } from "@tanstack/react-query";
 import { Suspense } from "react";
-import { ErrorBoundary } from "react-error-boundary";
-import { ErrorFallback } from "@/components/error-fallback";
+import { ProjectErrorBoundary } from "@/components/project-error-boundary";
 import ProjectLoading from "@/modules/projects/ui/components/project-loading";
 import ProjectView from "@/modules/projects/ui/views/project-view";
 import { getQueryClient, trpc } from "@/trpc/server";
@@ -21,18 +20,11 @@ export default async function ProjectPage({
   );
   return (
     <HydrationBoundary state={dehydrate(queryClient)}>
-      <ErrorBoundary
-        fallbackRender={({ error, resetErrorBoundary }) => (
-          <ErrorFallback
-            error={error}
-            resetErrorBoundary={resetErrorBoundary}
-          />
-        )}
-      >
+      <ProjectErrorBoundary>
         <Suspense fallback={<ProjectLoading />}>
           <ProjectView projectId={projectId} />
         </Suspense>
-      </ErrorBoundary>
+      </ProjectErrorBoundary>
     </HydrationBoundary>
   );
 }
