@@ -24,6 +24,42 @@ export const codeAgentFunction = inngest.createFunction(
   { id: "code-agent" },
   { event: "code-agent/run" },
   async ({ event, step }) => {
+    const TOTAL_STEPS = 7;
+    let currentStep = 0;
+
+    // Helper function to update progress
+    const updateProgress = async (stepName: string) => {
+      currentStep++;
+      await prisma.message.updateMany({
+        where: {
+          projectId: event.data.projectId,
+          role: "ASSISTANT",
+          type: "IN_PROGRESS",
+        },
+        data: {
+          progressStep: stepName,
+          progressCurrent: currentStep,
+          progressTotal: TOTAL_STEPS,
+        },
+      });
+    };
+
+    // Create initial progress message
+    await step.run("create-progress-message", async () => {
+      await prisma.message.create({
+        data: {
+          projectId: event.data.projectId,
+          content: "Starting generation...",
+          role: "ASSISTANT",
+          type: "IN_PROGRESS",
+          progressStep: "Initializing",
+          progressCurrent: 0,
+          progressTotal: TOTAL_STEPS,
+        },
+      });
+    });
+
+    await updateProgress("Creating sandbox environment");
     const sandboxId = await step.run("get-sandbox-id", async () => {
       const sandbox = await Sandbox.create("vision2web", {
         timeoutMs: 30 * 60 * 1000,
@@ -31,6 +67,7 @@ export const codeAgentFunction = inngest.createFunction(
       return sandbox.sandboxId;
     });
 
+    await updateProgress("Loading conversation history");
     const previousMessages = await step.run(
       "get-previous-messages",
       async () => {
@@ -39,21 +76,39 @@ export const codeAgentFunction = inngest.createFunction(
         const messages = await prisma.message.findMany({
           where: {
             projectId: event.data.projectId,
+            // Only include actual conversation messages, not progress indicators
+            type: {
+              in: ["RESULT"],
+            },
           },
           orderBy: {
-            createdAt: "desc",
+            createdAt: "asc",
           },
-          take: 5,
+          take: 10, // Get last 10 messages (5 exchanges)
+          include: {
+            fragment: true, // Include fragment data with files
+          },
         });
 
         for (const message of messages) {
+          let content = message.content;
+          
+          // If this is an assistant message with a fragment, include the code files
+          if (message.role === "ASSISTANT" && message.fragment?.files) {
+            const filesJson = message.fragment.files as { [path: string]: string };
+            const filesContext = Object.entries(filesJson)
+              .map(([path, fileContent]) => `\n\nFile: ${path}\n\`\`\`\n${fileContent}\n\`\`\``)
+              .join("\n");
+            content = `${content}${filesContext}`;
+          }
+          
           formattedMessages.push({
             type: "text",
             role: message.role === "ASSISTANT" ? "assistant" : "user",
-            content: message.content,
+            content: content,
           });
         }
-        return formattedMessages.reverse();
+        return formattedMessages;
       },
     );
 
@@ -196,6 +251,7 @@ export const codeAgentFunction = inngest.createFunction(
       throw new Error("Missing required payload: event.data.value");
     }
 
+    await updateProgress("Analyzing your request and generating code");
     const network = createNetwork<AgentState>({
       name: "coding-agent-network",
       agents: [codeAgent],
@@ -214,6 +270,7 @@ export const codeAgentFunction = inngest.createFunction(
 
     const result = await network.run(value, { state });
 
+    await updateProgress("Generating title for your project");
     const fragmentTitleGenerator = createAgent({
       name: "fragment-title-generator",
       description: "An agent for generating titles for code fragments",
@@ -232,6 +289,7 @@ export const codeAgentFunction = inngest.createFunction(
       result.state.data.summary,
     );
 
+    await updateProgress("Preparing response");
     const { output: responseOutput } = await responseGenerator.run(
       result.state.data.summary,
     );
@@ -254,6 +312,7 @@ export const codeAgentFunction = inngest.createFunction(
       !result.state.data.summary ||
       Object.keys(result.state.data.files || {}).length === 0;
 
+    await updateProgress("Deploying to sandbox");
     const sandboxUrl = await step.run("get-sandbox-url", async () => {
       const sandbox = await getSandbox(sandboxId);
       const host = sandbox.getHost(3000);
@@ -261,6 +320,15 @@ export const codeAgentFunction = inngest.createFunction(
     });
 
     await step.run("save-result", async () => {
+      // Delete the progress message
+      await prisma.message.deleteMany({
+        where: {
+          projectId: event.data.projectId,
+          role: "ASSISTANT",
+          type: "IN_PROGRESS",
+        },
+      });
+
       if (isError) {
         await prisma.message.create({
           data: {
